@@ -1,0 +1,257 @@
+unit RSFIXUnit;
+
+interface
+
+
+
+uses
+    SysUtils, FIXStructDef, FIXBuilder, FIXConstants, FIXParser,
+    RmsStruct, dbtables, DatabaseConstants, Classes, Dialogs, Controls, Forms;
+
+const
+  VObatchSize = 50;
+  VTbatchSize = 50;
+  VEbatchSize = 50;
+  VCbatchSize = 50;
+  VECbatchSize = 50;
+  PrimaryTraderRank = '3';
+  SecondaryTraderRank = '2';
+  NormalTraderRank = '1';
+  CrossIndicator = 'C';
+  BlockIndicator = 'B';
+  MyDelim = '^';
+  WebTraderCode = 'WEB';
+  SingleIndicator = 'S';
+  //QOrigClOrdID='^OrigClOrdID=';
+
+type
+    TTSFixParser_TEW = class(TTSFIXParser)
+      SocketHandle  : integer;
+      RemoteAddress : string;
+      User          : string;
+      TSFIXBuilder  : TTSFIXBuilder;
+
+      constructor Create;
+      destructor Destroy; override;
+
+      procedure FIXProcessNewOrderSingle(NewOrderSingle : TNewOrderSingleStruct); override;
+      procedure FIXProcessOrderCancelRequest(OrderCancelRequest : TOrderCancelRequestStruct); override;
+      procedure FIXProcessOrderModificationRequest(OrderModificationRequest : TOrderModificationRequestStruct); override;
+      procedure FIXProcessNewOrderCross(NewOrderCross : TNewOrderCrossStruct); override;
+      procedure FIXProcessTradeCaptureReport(TradeCaptureReport : TTradeCaptureReportStruct); override;
+      procedure FIXProcessTradeCaptureReportAck(TradeCaptureReportAck : TTradeCaptureReportAckStruct); override;
+
+      procedure FIXProcessViewOrderRequest(ViewOrderRequest : TReqViewOrderStruct);override;
+      procedure FIXProcessExpandOrderRequest(ExpandOrderRequest : TReqExpandOrderStruct);override;
+      procedure FIXProcessViewOrderCrossRequest(ViewOrderCrossRequest : TReqViewOderCrossStruct); override;
+      procedure FIXProcessExpandOrderCrossRequest(ExpandOrderCrossRequest : TReqExpandOrderCrossStruct); override;
+      procedure FIXProcessViewTradesRequest(ViewTradesRequest : TReqViewTradesStruct); override;
+      procedure FIXProcessBoardLotRequest(); override;
+      procedure FIXProcessOSSettingsRequest(); override;
+      procedure FIXProcessLTPPercentageRequest(); override;
+
+      function  GetUsername(SocketHandle: integer): string;
+      function  GetCrossIDfromDB(count :integer) : integer;
+      function  GetTradeCapIDfromDB(count :integer) : integer;
+      function  GetClOrdIDfromDB(count :integer) : integer;
+      function  RS_GetTradeConfirmation(tradercode : string) : boolean;
+      function  RS_ClOrdIDExistsNew(ClOrdID: string; var OrdStatus: string; var ResendExecReport: TExecutionReportStruct; var ResendNewOrderSingle: TNewOrderSingleStruct ) : boolean;
+      function  RS_ClOrdIDExistsMod(ClOrdID: string; var OrdStatus: string; var ResendExecReport: TExecutionReportStruct; var ResendOrderMod: TOrderModificationRequestStruct ) : boolean;
+      function  RS_ClOrdIDExistsCancel(ClOrdID: string; var OrdStatus: string; var ResendExecReport: TExecutionReportStruct; var ResendOrderCancel: TOrderCancelRequestStruct ) : boolean;
+      procedure RS_Get_Trader_AccountCode(ClOrdID: string; var tmpTrader: string; var tmpAccount: string);
+
+
+      procedure SendToCLIENTS(SendList : TStringList; ExecReportData, OrderData, ParentOrdID, ClOrdID: string; bRiskRejected, bPending, bResend: boolean; numConnected, rank : integer );
+      procedure SendToCLIENTSCross(SendList : TStringList; ExecReportData, ParentOrdID, ClOrdID : string; numConnected : integer);
+
+
+      //procedure RS_ReceiveNewOrderSingle(NewOrderSingle: TNewOrderSingleStruct; ExecutionReport : TExecutionReportStruct; OrderNum :string; TransactTime : TDatetime; bPending: boolean);
+      function RS_ReceiveNewOrderSingle(NewOrderSingle: TNewOrderSingleStruct; ExecutionReport : TExecutionReportStruct; OrderNum :string; TransactTime : TDatetime; bPending: boolean) : Boolean;
+
+      //procedure RS_ReceiveOrderCancelRequest(OrderCancelRequest : TOrderCancelRequestStruct; ExecReportRecord : TExecutionReportStruct; OrderNum : string; TransactTime : TDatetime);
+      function RS_ReceiveOrderCancelRequest(OrderCancelRequest : TOrderCancelRequestStruct; ExecReportRecord : TExecutionReportStruct; OrderNum : string; TransactTime : TDatetime) : Boolean;
+
+      //procedure RS_ReceiveOrderModificationRequest(OrderModificationRequest: TOrderModificationRequestStruct; ExecReportRecord : TExecutionReportStruct; OrderNum : string; TransactTime : TDatetime);
+      function  RS_ReceiveOrderModificationRequest(OrderModificationRequest: TOrderModificationRequestStruct; ExecReportRecord : TExecutionReportStruct; OrderNum : string; TransactTime : TDatetime) : Boolean;
+
+      procedure RS_ReceiveNewOrderCross(NewOrderCross : TNewOrderCrossStruct; ExecutionReport : TExecutionReportStruct; CrossID, ClOrdID_Buy, ClOrdID_Sell :string; TransactTime : TDatetime);
+      procedure RS_ReceiveTradeCaptureReport(TradeCaptureReport : TTradeCaptureReportStruct; TradeCapReportAckRecord : TTradeCaptureReportAckStruct; strTradeReportID: string; tmpTransactTime : TDatetime);
+      procedure RS_OrderCancelReject(OrigClOrdID : string; var OrderCancelReject : TOrderCancelRejectStruct);
+
+
+      procedure RS_FillReceivingTraders(var PrimaryList,SecondaryList,ViewAllList: TStringList; var count: integer; XchgAccntcode: string);
+      procedure RS_ApplyRiskmanagementCross(var tmpStatus, ErrMsg: string; CrossID, TransactDate : string; IsMarketOpen: boolean);
+      procedure RS_ApplyRiskmanagement(var tmpStatus, ErrMsg: string; ClientOrdID, TransactDate : string; IsMarketOpen: boolean);
+
+
+      Procedure RS_GetQueued;
+      procedure SaveToFile(StringToSave, Filename : string);
+
+      function generateOrderID() : string; //proc to generate OrdNum for ParentOrdID/ClOrdID
+      function generateCrossClOrdID() : string; //function to generate values for tag 11 (cross orders)
+      private
+          CtrPostfix: byte; //counter used in ParentOrdID/ClOrdID
+          CtrCross: word;   //counter for cross ClOrdIDs (seeded from file)
+          procedure SaveSeedToFile();
+          procedure LoadSeedfromFile();
+
+    end;
+
+var
+ TSFixParser_TEW: TTSFixParser_TEW;
+ ProcessOpParser_TEW: TTSFixParser_TEW;
+
+implementation
+
+uses
+ MsgOp {SendMsgToServer/Client}, RmsLib, RMSMain, LogMonitorTracker {logtomemo}, Windows;
+
+{ TTSFixParser_TEW }
+
+constructor TTSFixParser_TEW.Create;
+begin
+ inherited Create;
+   TSFIXBuilder :=  TTSFIXBuilder.Create;
+   LoadSeedfromFile;
+end;
+
+procedure TTSFixParser_TEW.SaveToFile(StringToSave, Filename : string);
+var
+ DeadlockFile : TextFile;
+begin
+  AssignFile(DeadlockFile,Filename);
+  try
+    //file exists -> append
+    Append(DeadlockFile);
+    try
+      Writeln(DeadlockFile,StringToSave);
+    finally
+      CloseFile(DeadlockFile);
+    end;
+  except
+    //file d.n.e -> create
+    try
+      Rewrite(DeadlockFile);
+      try
+        Writeln(DeadlockFile,StringToSave);
+      finally
+        CloseFile(DeadlockFile);
+      end;
+    except
+    end;
+  end;
+end;
+
+function TTSFixParser_TEW.GetUsername(SocketHandle: integer): string;
+var
+  i: integer;
+  tmpResult : string;
+begin
+  tmpResult:='';
+  for i:=1 to MaxClientConn do
+    if (ConnInfoArr[i].Connected) and (ConnInfoArr[i].Socketnum=SocketHandle) then
+      begin
+        tmpResult:=ConnInfoArr[i].Username;
+        break;
+      end;
+  Result := tmpResult;
+end;
+
+Procedure TTSFixParser_TEW.RS_GetQueued;
+var
+  QueuedQuery : TQuery;
+  NewOrderRec : TNewOrderSingleStruct;
+  TraderRole, AccountRole, i, PacketCtr: integer;
+  QueuedOrdersList : TStringlist;
+  NewOrderData, QuedConsolidated : String;
+  tmpBoolean : boolean;
+
+begin
+
+  QueuedOrdersList   := TStringList.Create;
+
+  TraderRole  :=36;
+  AccountRole :=24;
+  NewOrderData:='';
+  PacketCtr   :=0;
+  tmpBoolean  :=false;
+
+
+  QueuedQuery:=TQuery.Create(nil);
+  QueuedQuery.DatabaseName:=RmsForm.Dbase.DatabaseName;
+
+  if QueuedQuery.Active then
+      QueuedQuery.Close;
+
+  QueuedQuery.SQL.Clear;
+
+  QueuedQuery.SQL.Add('exec FXproc_GetQueued ');
+
+
+  try
+    QueuedQuery.Open;
+
+    try
+      While not QueuedQuery.EOF do
+        begin
+          {
+          type TNewOrderSingleStruct = record
+             ClOrdID           : TClOrdIDType;
+             Symbol            : TSymbolType;
+             OrderQty          : TSharesType;
+             OrdType           : TOrdType;
+             Price             : double;
+             StopPx            : double;
+             Side              : TSideType;
+             TimeInForce       : TTimeInForceType;
+             TransactTime      : TPSEDateTimeFormat;
+             ExpireDate        : TPSEDateFormat;
+             MinQty            : TSharesType;
+             MaxFloor          : TSharesType;
+             Text              : string;
+             OrderCapacity     : TOrdCapType;
+             TechOrdOrgin      : TTechOrdOrgType;
+             NoPartyIDs        : integer;
+             PartyBlock        : array[0..3] of TPartyBlockStruct;
+          end;
+
+            S1.ParentOrdID,
+            ClOrdID,
+            OrdStatus,
+            Symbol,
+            OrderQty,
+            OrdType,
+            Price,
+            StopPrice,
+            Side,
+            TimeInForce,
+            TransactTime,
+            ExpireDate,
+            MinQty,
+            MaxFloor,
+            [Text],                                                                                                                                                                                                                                                            
+            OrderCapacity,
+            TechOrdOrigin,
+            NoPartyIDs,
+            TraderID,
+            TraderSource,
+            AccountID,
+            AccountSource
+          }
+          
+          NewOrderRec.ClOrdID:=QueuedQuery.fieldbyname('ClOrdID').AsString;
+          NewOrderRec.Symbol:=QueuedQuery.fieldbyname('Symbol').AsString;
+          NewOrderRec.OrderQty:=StrToInt64(QueuedQuery.fieldbyname('OrderQty').AsString);
+          NewOrderRec.OrdType:=QueuedQuery.fieldbyname('OrdType').AsString;
+          NewOrderRec.Price:=QueuedQuery.fieldbyname('Price').AsFloat;
+          NewOrderRec.StopPx:=QueuedQuery.fieldbyname('StopPrice').AsFloat;
+          NewOrderRec.Side:=QueuedQuery.fieldbyname('Side').AsString;
+          NewOrderRec.TimeInForce:=QueuedQuery.fieldbyname('TimeInForce').AsString;
+          NewOrderRec.TransactTime:=QueuedQuery.fieldbyname('TransactTime').AsDateTime;
+          NewOrderRec.ExpireDate:=QueuedQuery.fieldbyname('ExpireDate').AsDateTime;
+          NewOrderRec.MinQty:=QueuedQuery.fieldbyname('MinQty').AsInteger;
+          NewOrderRec.MaxFloor:=QueuedQuery.fieldbyname('MaxFloor').AsInteger;
+          NewOrderRec.Text:=QueuedQuery.fieldbyname('Text').AsString;
+          NewOrderRec.OrderCapacity:=QueuedQuery.fieldbyname('OrderCapacity').AsString;
+          NewOrderRec.TechOrdOrgin:=QueuedQuery.fieldbyname('TechOrdOrigin').AsString;
+          NewOrderRec.NoPartyIDs:=QueuedQuery.fieldbyname('NoPartyIDs').AsInteger;
